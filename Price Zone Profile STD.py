@@ -180,8 +180,8 @@ if ticker:
     # ===============================
     # THE TABS
     # ===============================
-    t_close, t_demand, t_supply, t_vol, t_profile = st.tabs([
-        "🎯 Close", "📉 Low", "📈 High", "⚖️ Mid", "📊 Volume Profile"
+    t_close, t_demand, t_supply, t_vol, t_profile, t_readme = st.tabs([
+        "🎯 Close", "📉 Low", "📈 High", "⚖️ Mid", "📊 Volume Profile", "📖 Guide"
     ])
 
     with t_profile:
@@ -218,3 +218,39 @@ if ticker:
     with t_vol:
         df['Mid_Price'] = (df['High'] + df['Low']) / 2
         display_full_table(calculate_zones(df, 'Mid_Price', tol), curr_p, "4. Volatility (MID)", "Pivot", adr=adr_val, last_time=last_time)
+
+    with t_readme:
+        st.markdown("""
+        ### 🚀 How to Trade with Price Zones
+        
+        This tool identifies high-density price clusters using historical daily data. It helps find where 'Big Money' has historically supported or resisted the price.
+
+        ---
+        #### 1. Finding Your Entry (Demand/Low)
+        * **Switch to the 📉 Low Tab:** This shows clusters of historical daily lows (Support).
+        * **Look for 'Very Strong' Touch-Rank:** This indicates a price level that has been tested many times.
+        * **Entry Signal:** If the current price is approaching a **Very Strong** zone from above, look for a bounce.
+        * **Manipulation Check:** If `Manip?` is **YES**, it means that zone has extreme volume per touch. This is often where institutions are "cleaning" orders.
+
+        #### 2. Finding Your Exit (Supply/High)
+        * **Switch to the 📈 High Tab:** This shows clusters of historical daily highs (Resistance).
+        * **Targeting:** Look for the nearest 'Strong' or 'Very Strong' zone above your entry price.
+        * **The Pink Row:** In the tables, the row highlighted in **Magenta/Pink** is the zone closest to the current market price.
+
+        #### 3. Using the Volume Profile
+        
+
+[Image of volume profile chart with point of control]
+
+        * **POC (Red Dot):** The Point of Control. Price is naturally "attracted" to this level. If price is far above POC, it might be overextended.
+        * **VWAP (White Dash):** The average price weighted by volume. Staying above VWAP is generally bullish.
+
+        #### 4. The "Confirmation" (Close) Tab
+        * Use this tab to see where the stock actually *finishes* the day. If a stock is trading at $105, but there is a **Very Strong Close Zone** at $102, the stock has a high probability of "settling" back at $102 by end of day.
+
+        #### 🎯 Summary Strategy:
+        1.  **Identify Support:** Use the **Low** tab to find a "Very Strong" zone below price.
+        2.  **Verify Volume:** Ensure the **Trade-Rank** is also Medium or Strong.
+        3.  **Set Target:** Use the **High** tab to find the next "Strong" resistance zone.
+        4.  **Risk Management:** Your stop-loss should generally be just below the **Zone Low** of your entry cluster.
+        """, unsafe_allow_html=True)
