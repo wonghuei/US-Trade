@@ -4,6 +4,10 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import os
+import warnings
+
+# Suppress Deprecation/Future Warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # ===============================
 # CONFIG
@@ -24,9 +28,6 @@ st.markdown("""
             border: 1px solid #31333F; border-radius: 8px;
             font-size: 16px; line-height: 1.4; width: 100%;
         }
-        .guide-box {
-            background-color: #262730; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b;
-        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -37,7 +38,7 @@ tab1, tab2 = st.tabs(["📊 Price Calculator", "📖 Read Me / Guide"])
 
 with tab1:
     # =====================================================
-    # SMART PATH CONFIGURATION (LOCAL & GITHUB)
+    # SMART PATH CONFIGURATION
     # =====================================================
     LOCAL_PATH = r"C:\Users\swong\Owner\PYTHON\US Trading\Ticker\Leveraged Mapping.xlsx"
     GITHUB_PATH = os.path.join("log files", "Leveraged Mapping.xlsx")
@@ -53,7 +54,6 @@ with tab1:
     # LOAD ETF MAPPING
     # ===============================
     etf_mapping = {}
-
     try:
         df_map = pd.read_excel(FINAL_LOG_PATH, usecols=["Ticker", "Type", "ETF", "Leverage"])
         for _, row in df_map.iterrows():
@@ -87,16 +87,19 @@ with tab1:
     if ticker_input not in etf_mapping:
         st.warning(f"No ETF mapping found for '{ticker_input}'. Check your Excel file.")
     else:
-        # ===============================
-        # PRICE FETCH & CALCULATION
-        # ===============================
+        # Fixed: Functions and logic must be indented under the 'else'
         def fetch_price(t):
             try:
                 data = yf.download(t, period="1d", interval="1m", prepost=True, progress=False, auto_adjust=True)
                 if not data.empty:
-                    return round(float(data["Close"].iloc[-1]), 2)
+                    val = data["Close"].iloc[-1]
+                    return round(float(val.item() if hasattr(val, 'item') else val), 2)
+                
                 hist = yf.Ticker(t).history(period="1d")
-                return round(float(hist["Close"].iloc[-1]), 2) if not hist.empty else None
+                if not hist.empty:
+                    val = hist["Close"].iloc[-1]
+                    return round(float(val.item() if hasattr(val, 'item') else val), 2)
+                return None
             except:
                 return None
 
@@ -105,10 +108,12 @@ with tab1:
             if stock_price is None:
                 st.error(f"Unable to fetch price for {ticker_input}")
             else:
-                bull_prices = [(e["ticker"], fetch_price(e["ticker"]), e["leverage"]) for e in etf_mapping[ticker_input]["bull"]]
-                bear_prices = [(e["ticker"], fetch_price(e["ticker"]), e["leverage"]) for e in etf_mapping[ticker_input]["bear"]]
+                bull_info = etf_mapping[ticker_input]["bull"]
+                bear_info = etf_mapping[ticker_input]["bear"]
+                
+                bull_prices = [(e["ticker"], fetch_price(e["ticker"]), e["leverage"]) for e in bull_info]
+                bear_prices = [(e["ticker"], fetch_price(e["ticker"]), e["leverage"]) for e in bear_info]
 
-                # Generate Table Data
                 data_rows = []
                 pct_values = np.arange(MAX_PCT, MIN_PCT - (PERCENT_STEP/2), -PERCENT_STEP)
 
@@ -125,9 +130,6 @@ with tab1:
 
                 df_display = pd.DataFrame(data_rows)
 
-                # ===============================
-                # DISPLAY
-                # ===============================
                 st.code(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')} | {ticker_input} Base Price: {stock_price}")
 
                 header = "".join([f"{col:>15}" for col in df_display.columns])
@@ -148,24 +150,18 @@ with tab1:
 with tab2:
     st.markdown("""
     ### How to Use This Tool
-    This calculator helps you visualize the **theoretical price** of leveraged ETFs (Bull and Bear) based on the price movement of their underlying index.
+    This calculator helps you visualize the **theoretical price** of leveraged ETFs.
     
     #### 1. The Core Concept
-    Leveraged ETFs are designed to multiply the **daily** performance of an index. 
-    * **Bull (3x):** If the index goes up 1%, the ETF should go up ~3%.
-    * **Bear (3x):** If the index goes down 1%, the ETF should go up ~3%.
+    Leveraged ETFs multiply the **daily** performance of an index. 
     
     #### 2. How to Read the Table
-    Go to the **Price Calculator** tab and enter a ticker (e.g., `SOXX`). The table will generate a range of price targets:
+    * **Pct% Column:** Target price of index relative to current price.
+    * **Ticker Column:** Projected price of the base index.
+    * **Leveraged Columns:** Calculated target price for the ETF.
     
-    * **Pct% Column:** This represents the target price of the underlying index relative to its current price (100% = No change).
-    * **Ticker Column:** The projected price of the base index.
-    * **Leveraged Columns (e.g., SOXL 3x):** The calculated price the ETF *should* reach if the index hits that specific target.
-    
-    #### 3. Pro-Tips for Checking Correspondence
-    * **Support/Resistance:** Find a major support level for the underlying index (e.g., SPY at $500). Look up $500 in the table to see what the corresponding price for SPXL (Bull) or SPXS (Bear) would be.
-    * **Volatility Decay:** Remember that these calculations are based on the **current** spot price. Because of "Beta Slippage," leveraged ETFs are best for short-term targets.
-    * **Refresh:** Use the 🔄 button to get the most recent market prices before making a calculation.
+    #### 3. Pro-Tips
+    * **Volatility Decay:** These are short-term estimates. Long-term holding may diverge from these prices.
+    * **Refresh:** Use 🔄 to update latest spot prices.
     """)
-    
-    st.info("💡 **Note:** Calculations use the formula: $Price_{new} = Price_{current} \\times (1 + (Leverage \\times \\Delta Index))$")
+    st.info("💡 **Formula:** $Price_{new} = Price_{current} \\times (1 + (Leverage \\times \\Delta Index))$")
