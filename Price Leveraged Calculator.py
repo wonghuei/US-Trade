@@ -36,31 +36,6 @@ st.markdown("<h1>🌅 ETF Leveraged Price Calculator</h1>", unsafe_allow_html=Tr
 tab1, tab2 = st.tabs(["📊 Price Calculator", "📖 Read Me / Guide"])
 
 with tab1:
-    st.markdown("""
-    ### How to Use This Tool
-    This calculator helps you visualize the **theoretical price** of leveraged ETFs (Bull and Bear) based on the price movement of their underlying index.
-    
-    #### 1. The Core Concept
-    Leveraged ETFs are designed to multiply the **daily** performance of an index. 
-    * **Bull (3x):** If the index goes up 1%, the ETF should go up ~3%.
-    * **Bear (3x):** If the index goes down 1%, the ETF should go up ~3%.
-    
-    #### 2. How to Read the Table
-    Go to the **Price Calculator** tab and enter a ticker (e.g., `SOXX`). The table will generate a range of price targets:
-    
-    * **Pct% Column:** This represents the target price of the underlying index relative to its current price (100% = No change).
-    * **Ticker Column:** The projected price of the base index.
-    * **Leveraged Columns (e.g., SOXL 3x):** The calculated price the ETF *should* reach if the index hits that specific target.
-    
-    #### 3. Pro-Tips for Checking Correspondence
-    * **Support/Resistance:** Find a major support level for the underlying index (e.g., SPY at $500). Look up $500 in the table to see what the corresponding price for SPXL (Bull) or SPXS (Bear) would be.
-    * **Volatility Decay:** Remember that these calculations are based on the **current** spot price. Because of "Beta Slippage," leveraged ETFs are best for short-term targets.
-    * **Refresh:** Use the 🔄 button to get the most recent market prices before making a calculation.
-    """)
-    
-    st.info("💡 **Note:** Calculations use the formula: $Price_{new} = Price_{current} \\times (1 + (Leverage \\times \\Delta Index))$")
-
-with tab2:
     # =====================================================
     # SMART PATH CONFIGURATION (LOCAL & GITHUB)
     # =====================================================
@@ -169,3 +144,28 @@ with tab2:
 {separator}
 {rows_html}    </div>
                 """, unsafe_allow_html=True)
+
+with tab2:
+    st.markdown("""
+    ### How to Use This Tool
+    This calculator helps you visualize the **theoretical price** of leveraged ETFs (Bull and Bear) based on the price movement of their underlying index.
+    
+    #### 1. The Core Concept
+    Leveraged ETFs are designed to multiply the **daily** performance of an index. 
+    * **Bull (3x):** If the index goes up 1%, the ETF should go up ~3%.
+    * **Bear (3x):** If the index goes down 1%, the ETF should go up ~3%.
+    
+    #### 2. How to Read the Table
+    Go to the **Price Calculator** tab and enter a ticker (e.g., `SOXX`). The table will generate a range of price targets:
+    
+    * **Pct% Column:** This represents the target price of the underlying index relative to its current price (100% = No change).
+    * **Ticker Column:** The projected price of the base index.
+    * **Leveraged Columns (e.g., SOXL 3x):** The calculated price the ETF *should* reach if the index hits that specific target.
+    
+    #### 3. Pro-Tips for Checking Correspondence
+    * **Support/Resistance:** Find a major support level for the underlying index (e.g., SPY at $500). Look up $500 in the table to see what the corresponding price for SPXL (Bull) or SPXS (Bear) would be.
+    * **Volatility Decay:** Remember that these calculations are based on the **current** spot price. Because of "Beta Slippage," leveraged ETFs are best for short-term targets.
+    * **Refresh:** Use the 🔄 button to get the most recent market prices before making a calculation.
+    """)
+    
+    st.info("💡 **Note:** Calculations use the formula: $Price_{new} = Price_{current} \\times (1 + (Leverage \\times \\Delta Index))$")
