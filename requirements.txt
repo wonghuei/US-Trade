@@ -4,6 +4,7 @@ pandas
 numpy
 plotly
 pytz
+openpyxl
 matplotlib
 
 
