@@ -113,13 +113,24 @@ def display_full_table(zones_df, current_price, label, zone_use, adr=None, last_
         html_output += f'<span style="color:{color};">{line}</span>'
     st.markdown(html_output + "</div>", unsafe_allow_html=True)
 
+def get_swing_levels(df):
+    window = 5
+    df['Peak'] = df['High'][(df['High'] == df['High'].rolling(window=window*2+1, center=True).max())]
+    df['Trough'] = df['Low'][(df['Low'] == df['Low'].rolling(window=window*2+1, center=True).min())]
+    highs = df.dropna(subset=['Peak'])[['Peak']].copy()
+    lows = df.dropna(subset=['Trough'])[['Trough']].copy()
+    highs['Type'] = np.where(highs['Peak'] > highs['Peak'].shift(1), "Higher High", "Lower High")
+    lows['Type'] = np.where(lows['Trough'] < lows['Trough'].shift(1), "Lower Low", "Higher Low")
+    return highs, lows
+
 # ===============================
 # UI INPUTS
 # ===============================
+st.markdown("<p style='margin-bottom: 0px; color: #888; font-size: 12px;'>Enter Stock Ticker</p>", unsafe_allow_html=True)
 col1, col2, col_btn = st.columns([1, 2, 1])
 
 with col1:
-    ticker = st.text_input("Enter Ticker", value="APP", autocomplete="off").upper()
+    ticker = st.text_input("Enter Ticker", value="APP", autocomplete="off", label_visibility="collapsed").strip()
 
 with col2:
     lookback = st.radio("Historical Range", ["3mo", "6mo", "1y", "2y"], index=2, horizontal=True)
@@ -171,12 +182,13 @@ if ticker:
 
     # ADR Display
     st.code(f"ADR 10D: {adr_val:.2f} | ADR Upper: {curr_p+adr_val:.2f} | ADR Lower: {curr_p-adr_val:.2f}")
+    st.markdown('<p style="font-size:15px; color:white; margin-bottom:0px;">🔥 Hot Zone 30D  | ⚡ Active Zone (10% - 40%)  |  🏛   Historical (Within 10%)<p>', unsafe_allow_html=True)
 
     # ===============================
     # THE TABS
     # ===============================
-    t_chart, t_close, t_demand, t_supply, t_vol, t_profile, t_readme = st.tabs([
-        "📊 Chart", "🎯 Close Price", "📉 Low Price", "📈 High Price", "⚖️ Mid Price", "📊 Volume Profile", "📖 Guide"
+    t_chart, t_close, t_open, t_demand, t_supply, t_vol, t_profile, t_swings, t_readme = st.tabs([
+        "📊 Chart", "🎯 Close Price", "🌀 Open Price" , "📉 Low Price", "📈 High Price", "⚖️ Mid Price", "📊 Volume Profile", "Swing Levels", "📖 Guide"
     ])
 
     with t_chart:
@@ -255,10 +267,14 @@ if ticker:
             fig.add_annotation(x=max(counts), y=val, text=label, showarrow=False, xanchor="left", font=dict(color=col, size=12))
 
         fig.update_layout(template="plotly_dark", height=700, margin=dict(l=20, r=80, t=20, b=20), xaxis_visible=False, showlegend=False)
+        
         st.plotly_chart(fig, use_container_width=True)
 
     with t_close:
         display_full_table(calculate_zones(df, 'Close', tol), curr_p, "1. Confirmation (CLOSE)", "Confirmation", adr=adr_val, last_time=last_time)
+
+    with t_open:
+        display_full_table(calculate_zones(df, 'Open', tol), curr_p, "1. Start (OPEN)", "Start", adr=adr_val, last_time=last_time)
 
     with t_demand:
         display_full_table(calculate_zones(df, 'Low', tol), curr_p, "2. Demand (LOW)", "Support", adr=adr_val, last_time=last_time)
@@ -269,6 +285,12 @@ if ticker:
     with t_vol:
         df['Mid_Price'] = (df['High'] + df['Low']) / 2
         display_full_table(calculate_zones(df, 'Mid_Price', tol), curr_p, "4. Volatility (MID)", "Pivot", adr=adr_val, last_time=last_time)
+
+    with t_swings:
+        hh_df, ll_df = get_swing_levels(df.copy())
+        sc1, sc2 = st.columns(2)
+        with sc1: st.dataframe(hh_df[hh_df['Type'] == "Higher High"].sort_index(ascending=False), use_container_width=True)
+        with sc2: st.dataframe(ll_df[ll_df['Type'] == "Lower Low"].sort_index(ascending=False), use_container_width=True)
 
     with t_readme:
         st.markdown("""
