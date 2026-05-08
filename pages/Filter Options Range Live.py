@@ -16,7 +16,7 @@ else:
     TICKER_DIR = "ticker" 
     CSV_LOG_PATH = os.path.join("log files", "Log - Options Range.csv")
 
-st.set_page_config(layout="wide", page_title="Advanced Options Range")
+st.set_page_config(layout="wide", page_title="Filter Options")
 
 # UI STYLE
 st.markdown("""
@@ -28,7 +28,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1>📊 Filter Options Range</h1>", unsafe_allow_html=True)
+st.markdown("<h1>📊 Filter Options Range (YF + Skew Analysis)</h1>", unsafe_allow_html=True)
 
 # SAFE FUNCTIONS
 def safe_float(x):
@@ -48,7 +48,7 @@ def get_expected_range(ticker):
     t = yf.Ticker(ticker)
     try:
         # ALL DATA FROM YFINANCE (Spot Sync)
-        hist = t.history(period="1d", interval="15m", prepost=True)
+        hist = t.history(period="1d", interval="1m", prepost=True)
         if hist.empty: return None
         spot = float(hist["Close"].iloc[-1])
 
@@ -96,13 +96,17 @@ def get_expected_range(ticker):
     except:
         return None
 
-# CLASSIFICATION (Original + IBKR Skew logic)
+# CLASSIFICATION (Standardized IBKR 4-Tier Logic)
 def classify(row):
-    # We keep your original logic but use the Skew Ratio for more precision
     skew = row["Skew Ratio"]
-    if skew < 0.85: return "Call (Bull Skew)"
-    elif skew > 1.15: return "Put (Bear Skew)"
-    return "Neutral"
+    if skew < 0.8: 
+        return "Upside Speculation"
+    elif skew <= 1.2: 
+        return "Neutral"
+    elif skew <= 1.5: 
+        return "Defensive"
+    else: 
+        return "Extreme Put Skew"
 
 # COLOR LOGIC (Fixed Column Names)
 def color_df(df):
@@ -157,9 +161,12 @@ if run:
         # METRICS
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Tickers", len(df))
-        m2.metric("🟢 Bullish Skew", df["Status"].str.contains("Call").sum())
+        m2.metric("🔵 Upside", (df["Status"] == "Upside Speculation").sum())
         m3.metric("⚪ Neutral", (df["Status"] == "Neutral").sum())
-        m4.metric("🔴 Bearish Skew", df["Status"].str.contains("Put").sum())
+
+        # We group 'Defensive' and 'Extreme' into one 'Risk/Put Skew' metric
+        put_skew_count = df["Status"].isin(["Defensive", "Extreme Put Skew"]).sum()
+        m4.metric("🔴 Put Skew", put_skew_count)
 
         # DISPLAY
         st.dataframe(

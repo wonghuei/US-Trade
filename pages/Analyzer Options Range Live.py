@@ -34,6 +34,13 @@ def get_mid_price(row):
     last = safe_float(row.get('lastPrice'))
     return (bid + ask) / 2 if bid > 0 and ask > 0 else last
 
+def classify_skew(skew_ratio):
+    if skew_ratio is None or skew_ratio == 0: return "Unknown"
+    if skew_ratio < 0.8:  return "Upside Speculation"
+    if skew_ratio <= 1.2: return "Neutral"
+    if skew_ratio <= 1.5: return "Defensive"
+    return "Extreme Put Skew"
+
 def load_and_sync_data(ticker_symbol):
     t_obj = yf.Ticker(ticker_symbol)
     try:
@@ -80,10 +87,13 @@ def load_and_sync_data(ticker_symbol):
                 # Adjusted move based on your original logic
                 straddle_adj = max(straddle_move - abs(strike - price), 0)
 
+                # Calculate the ratio first
+                skew_ratio = p_mid / c_mid if c_mid > 0 else 1.0
+
                 results.append({
                     "Ticker": ticker_symbol,
                     "Timeframe": timeframe,
-                    "Period_End_Date": pd.to_datetime(exp),
+                    "Expiry": pd.to_datetime(exp),
                     "Spot_Price": price,
                     "ATM_Strike": strike,
                     "Price_Diff": price - strike, 
@@ -94,6 +104,7 @@ def load_and_sync_data(ticker_symbol):
                     "Skew Upper": price + c_mid,
                     "EM%": (straddle_adj / price) * 100 if price > 0 else 0,
                     "Skew_Ratio": p_mid / c_mid if c_mid > 0 else 1.0,
+                    "Status": classify_skew(skew_ratio),
                     "ATM_Call_Mid": c_mid,
                     "ATM_Put_Mid": p_mid
                 })
@@ -121,7 +132,7 @@ with c1:
         f"{st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}</p>",
         unsafe_allow_html=True
     )
-    ticker_input = st.text_input("Enter Ticker", value="NVDA", label_visibility="collapsed").strip().upper()
+    ticker_input = st.text_input("Enter Ticker", value="APP", label_visibility="collapsed").strip().upper()
 with c2:
     st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
     if st.button("🔄 Calculator"):
@@ -143,12 +154,12 @@ if ticker_input:
                     st.info(f"No expirations found for {tf}")
                     continue
                 
-                tf_df["Period_End_Date"] = tf_df["Period_End_Date"].dt.strftime('%d/%m/%Y')
+                tf_df["Expiry"] = tf_df["Expiry"].dt.strftime('%d/%m/%Y')
                 
                 show_cols = [
-                    "Period_End_Date", "Spot_Price", "ATM_Strike", "Price_Diff", 
+                    "Expiry", "Spot_Price", "ATM_Strike", "Price_Diff", 
                     "Diff_Pct", "Lower_Range", "Upper_Range", "Skew Lower", 
-                    "Skew Upper", "EM%", "Skew_Ratio", "ATM_Call_Mid", "ATM_Put_Mid"
+                    "Skew Upper", "EM%", "Skew_Ratio", "Status", "ATM_Call_Mid", "ATM_Put_Mid"
                 ]
                 
                 st.dataframe(
