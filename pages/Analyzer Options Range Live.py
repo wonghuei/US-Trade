@@ -121,7 +121,7 @@ with c1:
         f"{st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}</p>",
         unsafe_allow_html=True
     )
-    ticker_input = st.text_input("Enter Ticker", value="APP", label_visibility="collapsed").strip().upper()
+    ticker_input = st.text_input("Enter Ticker", value="NVDA", label_visibility="collapsed").strip().upper()
 with c2:
     st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
     if st.button("🔄 Calculator"):
