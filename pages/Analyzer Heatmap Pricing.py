@@ -76,7 +76,7 @@ with col_input:
     f"{st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}</p>",
     unsafe_allow_html=True
     )
-    ticker = st.text_input("Enter Ticker", value="APP", autocomplete="off", label_visibility="collapsed").strip().upper()
+    ticker = st.text_input("Enter Ticker", value="NVDA", autocomplete="off", label_visibility="collapsed").strip().upper()
 
 with col_refresh:
     st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
