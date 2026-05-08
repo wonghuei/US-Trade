@@ -28,7 +28,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1>📊 Filter Options Range (YF + Skew Analysis)</h1>", unsafe_allow_html=True)
+st.markdown("<h1>📊 Filter Options Range</h1>", unsafe_allow_html=True)
 
 # SAFE FUNCTIONS
 def safe_float(x):
@@ -48,7 +48,7 @@ def get_expected_range(ticker):
     t = yf.Ticker(ticker)
     try:
         # ALL DATA FROM YFINANCE (Spot Sync)
-        hist = t.history(period="1d", interval="1m", prepost=True)
+        hist = t.history(period="1d", interval="15m", prepost=True)
         if hist.empty: return None
         spot = float(hist["Close"].iloc[-1])
 
@@ -123,7 +123,7 @@ if "last_refresh" not in st.session_state:
 
 with c1:
     st.markdown(f"<p style='color: #888; font-size: 12px;'>Last sync: {st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}</p>", unsafe_allow_html=True)
-    file_input = st.text_input("Ticker File", value="WATCH", label_visibility="collapsed").strip().upper()
+    file_input = st.text_input("Ticker File", value="TEST", label_visibility="collapsed").strip().upper()
     ticker_file = os.path.join(TICKER_DIR, f"{file_input}.csv")
 
 with c2:
