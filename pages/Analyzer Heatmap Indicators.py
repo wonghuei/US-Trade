@@ -155,7 +155,7 @@ with col1:
     f"{st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}</p>",
     unsafe_allow_html=True
     )
-    ticker = st.text_input("Ticker:", value="APP", autocomplete="off", label_visibility="collapsed").strip().upper()
+    ticker = st.text_input("Ticker:", value="NVDA", autocomplete="off", label_visibility="collapsed").strip().upper()
     
 with col_refresh:
     st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
