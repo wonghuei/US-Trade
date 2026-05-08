@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 from datetime import datetime
@@ -139,6 +140,21 @@ def calc_macd(df, fast=12, slow=26, signal=9):
     hist = macd - signal_line
     return macd, signal_line, hist
 
+def calc_wvad_raw(df):
+    """Calculates the raw Williams' Variable Accumulation/Distribution value."""
+    range_diff = (df['High'] - df['Low']).replace(0, 1e-9)
+    # Formula: ((Close - Open) / (High - Low)) * Volume
+    return (df['Volume'] * (df['Close'] - df['Open'])) / range_diff
+
+def calc_wvad(df, period):
+    """Returns the rolling sum of the raw WVAD."""
+    raw = calc_wvad_raw(df)
+    return raw.rolling(window=period).sum()
+
+def calc_tor_raw(df):
+    # We will use this to compare Volume vs. its own Moving Average
+    return df['Volume']
+
 # =====================================================
 # UI & DATA
 # =====================================================
@@ -155,7 +171,7 @@ with col1:
     f"{st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}</p>",
     unsafe_allow_html=True
     )
-    ticker = st.text_input("Ticker:", value="NVDA", autocomplete="off", label_visibility="collapsed").strip().upper()
+    ticker = st.text_input("Ticker:", value="APP", autocomplete="off", label_visibility="collapsed").strip().upper()
     
 with col_refresh:
     st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
@@ -190,18 +206,16 @@ if ticker:
             mfi_s, mfi_l = calc_mfi(df, p1), calc_mfi(df, p2)
     
             v_col = "#00ff88" if v_diff > 0.1 else "#ff3333" if v_diff < -0.1 else "#888"
-
-            adr5 = calc_adr(df, 5).iloc[-1]
-            dollar_move = last_p * (adr5 / 100)
         
-            return {
-
+            res = {
                 "R_Low": last_p - dollar_move, "R_High": last_p + dollar_move,
                 "Sentiment": v, "Color": c, "Score": score, "Bias%": bias_val,
-                "RSI": rsi_s.iloc[-1], "MFI": mfi_s.iloc[-1], "ATR": calc_atr(df, p1).iloc[-1],
-                "ADR": adr5, "Mom%": (close.pct_change(p1).iloc[-1]) * 100,
-                "CCI": calc_cci(df, p1).iloc[-1], "Angle": np.degrees(np.arctan(kama_s.diff(1).iloc[-1]))
+                "RSI": rsi_s.iloc[-1], "MFI": mfi_s.iloc[-1], 
+                "Mom%": (close.pct_change(p1).iloc[-1]) * 100,
+                "CCI": calc_cci(df, p1).iloc[-1], 
+                "Angle": np.degrees(np.arctan(kama_s.diff(1).iloc[-1]))
             }
+            return res, res["Color"] # Returns the dict AND the color string separately
 
         # =====================================================
         # 🔥 TOP MULTI-TIMEFRAME SENTIMENT BAR
@@ -209,44 +223,54 @@ if ticker:
         def get_sentiment_summary(df, p1, p2):
             df = df.copy()
 
+            # 1. Existing Indicator Calculations
             df['KAMA_L'] = calc_kama(df['Close'], p2)
             df['RSI_S'], df['RSI_L'] = calc_rsi(df['Close'], p1), calc_rsi(df['Close'], p2)
             df['MFI_S'], df['MFI_L'] = calc_mfi(df, p1), calc_mfi(df, p2)
+            
+            # 2. Institutional Truth (Gatekeeper) using the new function
+            df['WVAD_S'] = calc_wvad(df, p1) 
 
             df = df.dropna()
-
-            if len(df) < 2:
-                return "⚪ NO EDGE", "#888"
+            if len(df) < 2: return "⚪ NO EDGE", "#888"
 
             latest, prev = df.iloc[-1], df.iloc[-2]
 
+            # Your standard scoring logic
             def get_score(a, b):
                 d = a - b
                 return 2 if d > 5 else 1 if d > 1 else -2 if d < -5 else -1 if d < -1 else 0
 
             score = get_score(latest['RSI_S'], latest['RSI_L']) + get_score(latest['MFI_S'], latest['MFI_L'])
-
             kama_diff = latest['KAMA_L'] - prev['KAMA_L']
             bias = ((latest['Close'] - latest['KAMA_L']) / latest['KAMA_L']) * 100
+            wvad_val = latest['WVAD_S']
 
+            # --- CO-OPERATIVE LOGIC ---
             if abs(kama_diff) <= 0.02:
-                return "⚪ NO EDGE", "#888"
+                if wvad_val > 0: 
+                    return "🔍 SILENT ACCUMULATION", "#00ccff"
+                return "⚪ NO EDGE", "#888" # Added the comma and color
+
             elif kama_diff > 0:
-                if score >= 2 and 0 <= bias <= 3:
-                    return "🚀 STRONG TREND UP", "#00ff88"
-                elif score < 0 and bias <= 1:
-                    return "💰 CATCHING UP", "#00ccff"
-                elif bias > 3:
-                    return "⚠️ CAUTION-PRICE > AVERAGE", "yellow"
-                else:
-                    return "🟢 STABLE UP", "#aaffaa"
-            else:
+                if bias > 3: 
+                    # FIX: Added the color "yellow" as the second return value
+                    return "⚠️ CAUTION-PRICE > AVERAGE", "yellow" 
+                
+                if wvad_val < 0:
+                    return "⚠️ HOLLOW STRENGTH", "orange" 
+                
+                # This part is already correct in your code
+                return ("🚀 STRONG TREND UP", "#00ff88") if score >= 2 else ("🟢 STABLE UP", "#aaffaa")
+
+            else: # KAMA Slope is Down
+                # The MSFT Recovery Case: Price Down but Volume is Green
+                if wvad_val > 0 and score > 0:
+                    return "🩹 RECOVERY / DIVERGENCE", "#ff8888"
+                    
                 if score <= -2 and bias < 0:
                     return "💀 STRONG TREND DOWN", "#ff3333"
-                elif score > 0:
-                    return "🩹 REVERSAL-MONITOR", "#ff8888"
-                else:
-                    return "🔴 TREND SLOW DOWN", "#ff5555"
+                return "🔴 TREND SLOW DOWN", "#ff5555"
 
         # compute all 3 timeframes
         s1, c1 = get_sentiment_summary(df_raw, 5, 10)
@@ -370,11 +394,30 @@ if ticker:
                 df['KDJ_SELL'] = kdj_bear & df['TREND_DOWN']
 
                 # =========================
+                # TOR
+                # =========================
+                # WVAD: Sum of pressure over P1 and P2
+                wvad_raw = calc_wvad_raw(df)
+                df['WVAD_S'] = (wvad_raw.rolling(window=p1).sum() / 1e6) 
+                df['WVAD_L'] = (wvad_raw.rolling(window=p2).sum() / 1e6) 
+
+                # =========================
+                # WVAD
+                # =========================
+                df['TOR_S'] = df['Volume'] / df['Volume'].rolling(window=p1).mean().replace(0, 1e-9)
+                df['TOR_L'] = df['Volume'] / df['Volume'].rolling(window=p2).mean().replace(0, 1e-9)
+
+                # =========================
                 # CLEAN
                 # =========================
                 df = df.dropna(subset=['Close'])
                 latest = df.iloc[-1]
                 prev = df.iloc[-2]
+
+                pdf = df.copy() 
+
+                pdf['WVAD_S'] = pdf['WVAD_S'] / 1e6
+                pdf['WVAD_L'] = pdf['WVAD_L'] / 1e6
 
                 # =========================
                 # 🔥 LAST 10 DAYS TABLE DATA
@@ -395,12 +438,14 @@ if ticker:
                     # MACD
                     'MACD', 'MACD_SIGNAL', 'MACD_HIST',
                     # KDJ
-                    'K', 'D', 'J'
+                    'K', 'D', 'J',
+                    'TOR_S', 'TOR_L', 'WVAD_S', 'WVAD_L'
+                    
                 ]
 
                 st.markdown(
                     f"<p style='margin-bottom:10px; color:steelblue; font-size:15px; font-weight:bold;'>📅 LAST 10 TRADING DAYS DATA TABLE</p>", unsafe_allow_html=True)
-                st.markdown("<p style='margin-bottom: 0px; color: steelblue; font-size: 15px; font-weight: bold;'>KDJ(Momentum+Timing) | MACD(Momentum+Trend) | ATR-ADR-HV(Volatility) | CCI-MFI-MOM-RSI(Momentum) | ANGLE-BIAS(Trend) | OBV(Volume)</p>", unsafe_allow_html=True)                
+                st.markdown("<p style='margin-bottom: 0px; color: steelblue; font-size: 15px; font-weight: bold;'>KDJ(Momentum+Timing) | MACD(Momentum+Trend) | HV(Volatility) | CCI-MFI-MOM-RSI(Momentum) | ANGLE-BIAS(Trend) | OBV(Volume)</p>", unsafe_allow_html=True)                
                 df_last5 = df[show_cols].tail(20).copy()
                 df_last5 = df_last5.sort_index(ascending=False)
 
@@ -512,6 +557,15 @@ if ticker:
                     # Volatility is usually positive; we use 4 stages of intensity
                     return apply_4_color(v, 5, 15, 30, 50)
 
+                def tor_style(v, p):
+                    # Uses period p to set limits (1.8 for short, 1.5 for long)
+                    limit = 1.8 if p <= 10 else 1.5
+                    return apply_4_color(v, 0.5, 0.8, 1.2, limit)
+
+                def wvad_style(v, p):
+                    limit = 2.0 if p <= 10 else 5.0
+                    return apply_4_color(v, -limit, -0.5, 0.5, limit)
+                
                 def obv_style(v, p):
                     try:
                         v = float(v)
@@ -553,6 +607,14 @@ if ticker:
                 styled = styled.map(lambda v: obv_style(v, p1), subset=["OBV_S"])
                 styled = styled.map(lambda v: obv_style(v, p2), subset=["OBV_L"])
 
+                # TOR (Volume Turnover)
+                styled = styled.map(lambda v: tor_style(v, p1), subset=["TOR_S"])
+                styled = styled.map(lambda v: tor_style(v, p2), subset=["TOR_L"])
+
+                # WVAD (Institutional Pressure)
+                styled = styled.map(lambda v: wvad_style(v, p1), subset=["WVAD_S"])
+                styled = styled.map(lambda v: wvad_style(v, p2), subset=["WVAD_L"])
+
                 # =========================
                 # DISPLAY (CORRECT)
                 # =========================
@@ -580,7 +642,11 @@ if ticker:
                         "J": "{:.0f}",
                         'DIF': "{:.0f}",
                         'DEA': "{:.0f}",
-                        'MACD': "{:.0f}"
+                        'MACD': "{:.0f}",
+                        'TOR_S': "{:.2f}x",
+                        'TOR_L': "{:.2f}x",
+                        'WVAD_S': "{:.0f}M",
+                        'WVAD_L': "{:.0f}M"
                     }),
                     width="stretch",
                     height=330
@@ -691,26 +757,35 @@ if ticker:
 
                 cl, cr = st.columns(2)
                 with cl:
-                    f1, a1 = plt.subplots(4, 1, figsize=(5, 12), sharex=True)
+                    f1, a1 = plt.subplots(5, 1, figsize=(5, 13), sharex=True)
                     # HV
                     a1[0].plot(x, pdf['HV_S'], color='white', ls='--', lw=0.5)
                     a1[0].plot(x, pdf['HV_L'], color='lightgreen', lw=0.5)
-                    a1[0].legend([f"HV{p1}: {latest[f'HV_S']:.2f}%", f"HV{p2}: {latest[f'HV_L']:.2f}%"], loc='upper center', bbox_to_anchor=(0.8, 1), fontsize=5, ncol=2, frameon=False)
+                    a1[0].legend([f"HV{p1}: {latest[f'HV_S']:.2f}%", f"HV{p2}: {latest[f'HV_L']:.2f}%"],
+                                  loc='upper center', bbox_to_anchor=(0.5, 1), fontsize=5, ncol=2, frameon=False)
                     # CCI
                     a1[1].plot(x, pdf['CCI_S'], color='white', ls='--', lw=0.5)
                     a1[1].plot(x, pdf['CCI_L'], color='lightgreen', lw=0.5)
                     a1[1].axhline(0, color='silver', ls=':', lw=0.5);
-                    a1[1].legend([f"CCI{p1}: {latest[f'CCI_S']:.2f}", f"CCI{p2}: {latest[f'CCI_L']:.2f}"], loc='upper center', bbox_to_anchor=(0.8, 1), fontsize=5, ncol=2, frameon=False)
+                    a1[1].legend([f"CCI{p1}: {latest[f'CCI_S']:.2f}", f"CCI{p2}: {latest[f'CCI_L']:.2f}"],
+                                  loc='upper center', bbox_to_anchor=(0.5, 1), fontsize=5, ncol=2, frameon=False)
                     # MOM
                     a1[2].plot(x, pdf['Mom_S'], color='white', ls='--', lw=0.5)
                     a1[2].plot(x, pdf['Mom_L'], color='lightgreen', lw=0.5)
                     a1[2].axhline(0, color='silver', ls=':', lw=0.5);
-                    a1[2].legend([f"MOM{p1}: {latest[f'Mom_S']:.2f}%", f"MOM{p2}: {latest[f'Mom_L']:.2f}%"], loc='upper center', bbox_to_anchor=(0.8, 1), fontsize=5, ncol=2, frameon=False)
+                    a1[2].legend([f"MOM{p1}: {latest[f'Mom_S']:.2f}%", f"MOM{p2}: {latest[f'Mom_L']:.2f}%"],
+                                  loc='upper center', bbox_to_anchor=(0.5, 1), fontsize=5, ncol=2, frameon=False)
                     # ANGLE
                     a1[3].plot(x, pdf['K_Ang_S'], color='white', ls='--', lw=0.5)
                     a1[3].plot(x, pdf['K_Ang_L'], color='lightgreen', lw=0.5)
                     a1[3].axhline(0, color='silver', ls=':', lw=0.5);
-                    a1[3].legend([f"Ang{p1}: {latest[f'K_Ang_S']:.2f}°", f"Ang{p2}: {latest[f'K_Ang_L']:.2f}°"], loc='upper center', bbox_to_anchor=(0.8, 1), fontsize=5, ncol=2, frameon=False)                    
+                    a1[3].legend([f"Ang{p1}: {latest[f'K_Ang_S']:.2f}°", f"Ang{p2}: {latest[f'K_Ang_L']:.2f}°"],
+                                  loc='upper center', bbox_to_anchor=(0.5, 1), fontsize=5, ncol=2, frameon=False)
+                    # OBV
+                    a1[4].plot(x, pdf['OBV_S'], color='white', ls='--', lw=0.5)
+                    a1[4].plot(x, pdf['OBV_L'], color='lightgreen', lw=0.5)
+                    a1[4].legend([f"OBV{p1}: {latest[f'OBV_S']/1e6:.2f}M", f"OBV{p2}: {latest[f'OBV_L']/1e6:.2f}M"],
+                                  loc='upper center', bbox_to_anchor=(0.5, 1), fontsize=5, ncol=2, frameon=False)
                     for ax in a1: ax.grid(True, alpha=0.1); ax.axvline(x[-1], color='white', ls=':', alpha=0.3)
                     for ax in a1:
                         ax.set_xticks(x[::4])
@@ -722,30 +797,41 @@ if ticker:
                     st.pyplot(f1)
 
                 with cr:
-                    f2, a2 = plt.subplots(4, 1, figsize=(5, 12), sharex=True)
-                    # OBV
-                    a2[0].plot(x, pdf['OBV_S'], color='white', ls='--', lw=0.5)
-                    a2[0].plot(x, pdf['OBV_L'], color='lightgreen', lw=0.5)
-                    a2[0].legend([f"OBV{p1}: {latest[f'OBV_S']/1e6:.2f}M", f"OBV{p2}: {latest[f'OBV_L']/1e6:.2f}M"], loc='upper center', bbox_to_anchor=(0.8, 1), fontsize=5, ncol=2, frameon=False)
+                    f2, a2 = plt.subplots(5, 1, figsize=(5, 12.85), sharex=True)
+                    # TOR
+                    a2[0].plot(x, pdf['TOR_S'], color='white', ls='--', lw=0.5)
+                    a2[0].plot(x, pdf['TOR_L'], color='lightgreen', lw=0.5)
+                    a2[0].axhline(1.0, color='silver', ls=':', lw=0.5)
+                    a2[0].legend([f"TOR{p1}: {latest['TOR_S']:.2f}x", f"TOR{p2}: {latest['TOR_L']:.2f}x"], 
+                                  loc='upper center', bbox_to_anchor=(0.5, 1), fontsize=5, ncol=2, frameon=False)                    
                     # MFI
                     a2[1].plot(x, pdf['MFI_S'], color='white', ls='--', lw=0.5)
                     a2[1].plot(x, pdf['MFI_L'], color='lightgreen', lw=0.5)
                     a2[1].axhline(80, color='lime', ls=':', lw=0.5);
                     a2[1].axhline(50, color='silver', ls=':', lw=0.5);
                     a2[1].axhline(20, color='red', ls=':', lw=0.5);
-                    a2[1].legend([f"MFI{p1}: {latest[f'MFI_S']:.2f}", f"MFI{p2}: {latest[f'MFI_L']:.2f}"], loc='upper center', bbox_to_anchor=(0.8, 1), fontsize=5, ncol=2, frameon=False)
+                    a2[1].legend([f"MFI{p1}: {latest[f'MFI_S']:.2f}", f"MFI{p2}: {latest[f'MFI_L']:.2f}"],
+                                  loc='upper center', bbox_to_anchor=(0.5, 1), fontsize=5, ncol=2, frameon=False)
                     # RSI
                     a2[2].plot(x, pdf['RSI_S'], color='white', ls='--', lw=0.5)
                     a2[2].plot(x, pdf['RSI_L'], color='lightgreen', lw=0.5)
                     a2[2].axhline(80, color='lime', ls=':', lw=0.5);
                     a2[2].axhline(50, color='silver', ls=':', lw=0.5);
                     a2[2].axhline(20, color='red', ls=':', lw=0.5);
-                    a2[2].legend([f"RSI{p1}: {latest[f'RSI_S']:.2f}", f"RSI{p2}: {latest[f'RSI_L']:.2f}"], loc='upper center', bbox_to_anchor=(0.8, 1), fontsize=5, ncol=2, frameon=False)
+                    a2[2].legend([f"RSI{p1}: {latest[f'RSI_S']:.2f}", f"RSI{p2}: {latest[f'RSI_L']:.2f}"],
+                                  loc='upper center', bbox_to_anchor=(0.5, 1), fontsize=5, ncol=2, frameon=False)
                     # BIAS
                     a2[3].plot(x, pdf['Bias_S'], color='white', ls='--', lw=0.5)
                     a2[3].plot(x, pdf['Bias_L'], color='lightgreen', lw=0.5)
                     a2[3].axhline(0, color='silver', ls=':', lw=0.5);
-                    a2[3].legend([f"Bias{p1}: {latest['Bias_S']:.2f}%", f"Bias{p2}: {latest['Bias_L']:.2f}%"], loc='upper center', bbox_to_anchor=(0.8, 1), fontsize=5, ncol=2, frameon=False)
+                    a2[3].legend([f"Bias{p1}: {latest['Bias_S']:.2f}%", f"Bias{p2}: {latest['Bias_L']:.2f}%"],
+                                  loc='upper center', bbox_to_anchor=(0.5, 1), fontsize=5, ncol=2, frameon=False)
+                    # WVAD
+                    a2[4].plot(x, pdf['WVAD_S'], color='white', ls='--', lw=0.5)
+                    a2[4].plot(x, pdf['WVAD_L'], color='lightgreen', lw=0.5)      
+                    a2[4].axhline(0, color='silver', ls=':', lw=0.5)
+                    a2[4].legend([f"WVAD{p1}: {latest['WVAD_S']/1e6:.2f}M", f"WVAD{p2}: {latest['WVAD_L']/1e6:.2f}M"], 
+                                  loc='upper center', bbox_to_anchor=(0.5, 1), fontsize=5, ncol=2, frameon=False)
                     for ax in a2: ax.grid(True, alpha=0.1); ax.axvline(x[-1], color='white', ls=':', alpha=0.3)
                     for ax in a2:
                         ax.set_xticks(x[::4])
