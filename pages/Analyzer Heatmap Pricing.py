@@ -76,7 +76,7 @@ with col_input:
     f"{st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}</p>",
     unsafe_allow_html=True
     )
-    ticker = st.text_input("Enter Ticker", value="NVDA", autocomplete="off", label_visibility="collapsed").strip().upper()
+    ticker = st.text_input("Enter Ticker", value="APP", autocomplete="off", label_visibility="collapsed").strip().upper()
 
 with col_refresh:
     st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
@@ -113,8 +113,16 @@ if df.empty or len(df) < 300:
 # =====================================================
 # 🔥 ADD THIS (5M DATA FOR SESSION VWAP)
 # =====================================================
+# =====================================================
+# 🔥 ADD THIS (5M DATA FOR SESSION VWAP)
+# =====================================================
 df_5m = yf.download(ticker, period="1d", interval="5m", prepost=True, progress=False)
 df_5m = df_5m.dropna()
+
+# --- ADD THESE TWO LINES TO FIX THE ERROR ---
+if isinstance(df_5m.columns, pd.MultiIndex):
+    df_5m.columns = df_5m.columns.get_level_values(0)
+# ---------------------------------------------
 
 # =====================================================
 # INDICATORS
@@ -324,7 +332,7 @@ else:
     open_1d = float(df.iloc[-1]['Open'])
 
 # Keep your existing VWAP calculation (already uses 5m)
-vwap_1d = float(calc_last_vwap(df_5m, last_date).iloc[-1])
+vwap_1d = float(calc_last_vwap(df_5m, last_date))
 
 # 1. Calculate the Raw True Range (TR) Series
 tr = pd.concat([
