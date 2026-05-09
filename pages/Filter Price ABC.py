@@ -120,12 +120,14 @@ def scan_tickers(ticker_list, interval):
                    else "⚪ C (LOW VOLUME)" if flag == "C (NO VOLUME)" \
                    else "⏳ Wait C > A" if flag == "Wait C > A" \
                    else "🔍 NO PATTERN"
-
+                   
             results.append({
                 "Ticker": tkr_clean, "FLAG": flag, "Scenario": scen, 
                 "WVAD (10DAY)": wvad_now, "CCI (10DAY)": cci_now,
                 "Price Now": live_p, "VWAP (5MIN)": last_vwap, 
-                "Point A": a_p, "Point B": b_p if b_p > 0 else "-", "Point C": c_p if c_p > 0 else "-"
+                "Point A": a_p, 
+                "Point B": b_p if b_p > 0 else np.nan, 
+                "Point C": c_p if c_p > 0 else np.nan
             })
         except: continue
         progress_bar.progress((i + 1) / len(ticker_list))
@@ -147,6 +149,8 @@ def format_readable(df):
         return '%.2f%s' % (abs_n * (1 if num >= 0 else -1), ['', 'K', 'M', 'G', 'T'][mag])
 
     def price_fmt(x):
+        # pd.isna checks for np.nan values
+        if pd.isna(x) or x == 0: return "-"
         return "{:,.2f}".format(x) if isinstance(x, (int, float)) else x
 
     return df.style.map(
@@ -199,6 +203,6 @@ if os.path.exists(csv_path):
             
             res_df = st.session_state.get(f"results_{interval}", pd.DataFrame())
             if not res_df.empty:
-                st.dataframe(format_readable(res_df), use_container_width=True, hide_index=True)
+                st.dataframe(format_readable(res_df), width="stretch", hide_index=True)
 else:
     st.error(f"File not found: {csv_path}")
