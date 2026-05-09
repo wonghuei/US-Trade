@@ -8,6 +8,15 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # =============================
+# GLOBAL SETTINGS
+# =============================
+# This defines the "10 Day" lookback for all indicators
+LOOKBACK_DAYS = 10 
+# Bars per 16h trading day (Pre+Post)
+BARS_PER_DAY_30M = 32  
+BARS_PER_DAY_1H = 16
+
+# =============================
 # UI CONFIG
 # =============================
 st.set_page_config(layout="wide", page_title="Trend ABC")
@@ -16,8 +25,9 @@ st.markdown("""
     <style>
         .block-container { padding-top: 1.5rem; padding-bottom: 0rem; padding-left: 2rem; padding-right: 2rem; }
         h1 { font-size: 20px !important; margin-bottom: 0px !important; }
-        [data-testid="stMetricValue"] { font-size: 15px !important; font-weight: 700; color: #00ff00; }
-        [data-testid="stMetricLabel"] { font-size: 13px !important; }
+        .summary-box { background-color: #111; border: 1px solid #333; padding: 10px; border-radius: 5px; text-align: center; }
+        .summary-label { color: #888; font-size: 12px; margin-bottom: 2px; }
+        .summary-value { color: #00ff00; font-size: 18px; font-weight: bold; margin-bottom: 0px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -50,26 +60,43 @@ with col_refresh:
 # DATA ENGINE
 # =============================
 def get_data(ticker, interval):
-    df = yf.download(ticker, period="7d", interval=interval, auto_adjust=True)
-    if df.empty: return None
+    # Calculate exact bars for the 10-day alignment
+    if interval == "30m":
+        window = LOOKBACK_DAYS * BARS_PER_DAY_30M
+    else:
+        window = LOOKBACK_DAYS * BARS_PER_DAY_1H
+
+    # Download 1: display (10d) | Download 2: math buffer (20d)
+    df_price = yf.download(ticker, period="10d", interval=interval, prepost=True, auto_adjust=True)
+    df_math = yf.download(ticker, period="20d", interval=interval, prepost=True, auto_adjust=True)
     
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+    if df_price.empty or df_math.empty: return None
+
+    for d in [df_price, df_math]:
+        if isinstance(d.columns, pd.MultiIndex): 
+            d.columns = d.columns.get_level_values(0)
+
+    # --- WVAD (10-Day Aligned) ---
+    hl_range = (df_math['High'] - df_math['Low']).replace(0, 0.0001)
+    raw_wvad = ((df_math['Close'] - df_math['Open']) / hl_range) * df_math['Volume']
+    df_math['WVAD'] = raw_wvad.rolling(window=window).sum()
+
+    # --- CCI (10-Day Aligned) ---
+    tp = (df_math['High'] + df_math['Low'] + df_math['Close']) / 3
+    sma = tp.rolling(window=window).mean()
+    mad = tp.rolling(window=window).apply(lambda x: np.mean(np.abs(x - np.mean(x))), raw=True)
+    df_math['CCI'] = (tp - sma) / (0.015 * mad)
+
+    # Sync math back to the 10-day price chart
+    df_price['WVAD'] = df_math['WVAD']
+    df_price['CCI'] = df_math['CCI']
     
-    # WVAD Calculation
-    # Formula: ((Close - Open) / (High - Low)) * Volume
-    # We sum it over 14 periods to show the accumulation trend
-    hl_range = (df['High'] - df['Low']).replace(0, 0.0001) # Avoid div by zero
-    raw_wvad = ((df['Close'] - df['Open']) / hl_range) * df['Volume']
-    df['WVAD'] = raw_wvad.rolling(window=14).sum()
-    
-    return df.astype(float).fillna(0)
+    return df_price.astype(float).fillna(0)
 
 def find_recursive_chain(df):
     close = df['Close'].values
     times = df.index
     patterns = []
-    
     cursor = 2
     while cursor < len(close) - 1:
         A, B, C = None, None, None
@@ -78,7 +105,6 @@ def find_recursive_chain(df):
                 A = {'time': times[i], 'price': close[i], 'idx': i}
                 break
         if not A: break
-        
         found_reset = False
         for j in range(A['idx'] + 1, len(close)):
             if close[j] < A['price']:
@@ -89,12 +115,10 @@ def find_recursive_chain(df):
                 if close[j] > close[j-1] and close[j] > close[j+1]:
                     B = {'time': times[j], 'price': close[j], 'idx': j}
                     break
-        
         if found_reset: continue
         if not B:
             patterns.append({'A': A, 'B': None, 'C': None, 'state': 'SEARCHING_FOR_B'})
             break
-
         for k in range(B['idx'] + 1, len(close)):
             if close[k] < A['price']:
                 cursor = k
@@ -111,101 +135,118 @@ def find_recursive_chain(df):
                         cursor = k
                         found_reset = True
                         break
-        
         if found_reset: continue
         if not C:
             patterns.append({'A': A, 'B': B, 'C': None, 'state': 'WAITING_FOR_C'})
             break
-                
     return patterns
 
+# =============================
+# SUMMARY TOP 
+# =============================
+def render_summary_top(ticker, interval_label):
+    # 5m data for Price/VWAP
+    df_5m = yf.download(ticker, period="1d", interval="5m", prepost=True, auto_adjust=True)
+    # Aligned 10-day data for indicators
+    df_current = get_data(ticker, interval_label)
+
+    if df_5m.empty or df_current is None: return
+
+    if isinstance(df_5m.columns, pd.MultiIndex): 
+        df_5m.columns = df_5m.columns.get_level_values(0)
+
+    # --- Logic to find the Last Pivot ---
+    patterns = find_recursive_chain(df_current)
+    last_pivot_name = "N/A"
+    last_pivot_price = 0.0
+    
+    if patterns:
+        last_p = patterns[-1]
+        # Determine if the latest point in the last pattern is C, B, or A
+        if last_p['C']:
+            last_pivot_name, last_pivot_price = "C", last_p['C']['price']
+        elif last_p['B']:
+            last_pivot_name, last_pivot_price = "B", last_p['B']['price']
+        elif last_p['A']:
+            last_pivot_name, last_pivot_price = "A", last_p['A']['price']
+
+    # Real-time Price & VWAP
+    price_now = df_5m['Close'].iloc[-1]
+    vwap = (df_5m['Close'] * df_5m['Volume']).cumsum() / df_5m['Volume'].cumsum()
+    last_vwap = vwap.iloc[-1]
+
+    # Aligned Indicators
+    last_cci = df_current['CCI'].iloc[-1]
+    current_wvad = df_current['WVAD'].iloc[-1]
+    wvad_color = "#00ff00" if current_wvad > 0 else "#ff4b4b"
+
+    # UI DISPLAY - Increased to 5 columns
+    c1, c2, c3, c4, c5 = st.columns(5)    
+    c1.markdown(f"<div class='summary-box'><p class='summary-label'>PRICE NOW (5min)</p><p class='summary-value'>{price_now:.2f}</p></div>", unsafe_allow_html=True)    
+    c2.markdown(f"<div class='summary-box'><p class='summary-label'>VWAP (5min)</p><p class='summary-value'>{last_vwap:.2f}</p></div>", unsafe_allow_html=True)    
+    c3.markdown(f"<div class='summary-box'><p class='summary-label'>CCI (10-DAY)</p><p class='summary-value'>{last_cci:.2f}</p></div>", unsafe_allow_html=True)    
+    c4.markdown(f"<div class='summary-box'><p class='summary-label'>WVAD (10-DAY)</p><p class='summary-value' style='color:{wvad_color}'>{current_wvad:,.0f}</p></div>", unsafe_allow_html=True)
+    c5.markdown(f"""
+        <div class='summary-box'>
+            <p class='summary-label'>LAST PIVOT ({last_pivot_name})</p>
+            <p class='summary-value' style='color:#00FF00'>{last_pivot_price:.2f}</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
 # =============================
 # CHARTING
 # =============================
 def render_analysis(label, interval):
+    # Summary on top of each tab
+    render_summary_top(ticker, interval)
+    
     df = get_data(ticker, interval)
     if df is None: return
+    
+    # 1. Strip timezone and create string labels for the Category axis
+    df.index = df.index.tz_localize(None)
+    df_str_index = df.index.strftime('%Y-%m-%d %H:%M:%S')
+    
     patterns = find_recursive_chain(df)
     
-    # Create Subplots
-    fig = make_subplots(
-        rows=2, cols=1, 
-        shared_xaxes=True, 
-        vertical_spacing=0.03, 
-        row_heights=[0.7, 0.3]
-    )
-
-    # 1. PRICE LINE (Row 1)
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df['Close'], name="Close Price", 
-        line=dict(color="steelblue", width=1.5), showlegend=True
-    ), row=1, col=1)
-
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
+    
+    # 1. PRICE LINE - Use strings for X to match the category axis
+    fig.add_trace(go.Scatter(x=df_str_index, y=df['Close'], name="Close Price", line=dict(color="steelblue", width=1.5)), row=1, col=1)
+    
     color_set = ["magenta", "yellow", "red"]
-
-    # 2. ABC CHAINS (Row 1)
     for i, p in enumerate(patterns):
         is_latest = (i == len(patterns) - 1)
         current_color = "#00FF00" if is_latest else color_set[i % 3]
-        pts = [p['A']]
-        labels = ["A"]
-        if p['B']: 
-            pts.append(p['B'])
-            labels.append("B")
-        if p['C']: 
-            pts.append(p['C'])
-            labels.append("C")
+        
+        # FIX: Convert pattern timestamps to strings matching the axis
+        pts = []
+        if p['A']: pts.append({'time': p['A']['time'].strftime('%Y-%m-%d %H:%M:%S'), 'price': p['A']['price'], 'lbl': 'A'})
+        if p['B']: pts.append({'time': p['B']['time'].strftime('%Y-%m-%d %H:%M:%S'), 'price': p['B']['price'], 'lbl': 'B'})
+        if p['C']: pts.append({'time': p['C']['time'].strftime('%Y-%m-%d %H:%M:%S'), 'price': p['C']['price'], 'lbl': 'C'})
 
-        # Connection Lines
+        # Draw lines using string coordinates
         fig.add_trace(go.Scatter(
-            x=[pt['time'] for pt in pts], y=[pt['price'] for pt in pts],
-            mode="lines", line=dict(color=current_color, width=1, dash="dot"),
+            x=[pt['time'] for pt in pts], 
+            y=[pt['price'] for pt in pts], 
+            mode="lines", 
+            line=dict(color=current_color, width=1, dash="dot"), 
             showlegend=False
         ), row=1, col=1)
+        
+        for pt in pts:
+            y_offset = -30 if pt['lbl'] == "B" else 30 
+            fig.add_annotation(x=pt['time'], y=pt['price'], text=pt['lbl'], showarrow=True, arrowhead=0, arrowwidth=0.5, arrowcolor=current_color, ax=0, ay=y_offset, font=dict(color=current_color, size=10), bgcolor="rgba(0,0,0,0)", row=1, col=1)
 
-        # Labels
-        for pt, lbl in zip(pts, labels):
-            y_offset = -30 if lbl == "B" else 30 
-            fig.add_annotation(
-                x=pt['time'], y=pt['price'], text=lbl, showarrow=True, arrowhead=0,
-                arrowwidth=0.5, arrowcolor=current_color, ax=0, ay=y_offset,
-                font=dict(color=current_color, size=10, family="Arial"),
-                bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)", row=1, col=1
-            )
-
-    # 3. WVAD SUB-CHART (Row 2) - NO WEEKENDS
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df['WVAD'], name="WVAD", 
-        line=dict(color="#FFA500", width=0.8),
-        fill='tozeroy', 
-        fillcolor='rgba(255, 165, 0, 0.15)',
-        showlegend=False
-    ), row=2, col=1)
-
-    # Add 0-Line for WVAD
+    # 2. WVAD - Use strings for X
+    fig.add_trace(go.Scatter(x=df_str_index, y=df['WVAD'], name="WVAD", line=dict(color="#FFA500", width=0.8), fill='tozeroy', fillcolor='rgba(255, 165, 0, 0.15)', showlegend=False), row=2, col=1)
     fig.add_hline(y=0, line_width=1, line_color="white", opacity=0.3, row=2, col=1)
-
-    # SHARED AXIS CONFIG
-    short_dates = df.index.strftime('%b %d %H:%M')
     
-    fig.update_xaxes(
-        type='category', # This is what hides weekends and aligns both rows
-        showgrid=False,
-        tickmode='array',
-        tickvals=df.index[::max(1, len(df)//10)], 
-        ticktext=short_dates[::max(1, len(df)//10)],
-        tickangle=0,
-    )
-
-    fig.update_layout(
-        template="plotly_dark", height=500,
-        yaxis=dict(gridcolor="#333", side="right"),
-        #yaxis2=dict(gridcolor="#333", side="right", title="WVAD Vol Pulse"),
-        margin=dict(l=0, r=0, t=40, b=40),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0)
-    )
-
+    # Format the bottom labels
+    short_dates = df.index.strftime('%b %d %H:%M')
+    fig.update_xaxes(type='category', showgrid=False, tickmode='array', tickvals=df_str_index[::max(1, len(df)//10)], ticktext=short_dates[::max(1, len(df)//10)])
+    fig.update_layout(template="plotly_dark", height=480, margin=dict(l=0, r=0, t=40, b=40), showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
+    
     st.plotly_chart(
         fig, 
         width="stretch",
@@ -222,7 +263,11 @@ def render_analysis(label, interval):
         }
     )
 
+# =============================
 # MAIN
-t1, t2 = st.tabs(["15 MINUTE SCAN", "30 MINUTE SCAN"])
-with t1: render_analysis("15m", "15m")
-with t2: render_analysis("30m", "30m")
+# =============================
+t1, t2 = st.tabs(["30 MINUTE SCAN", "ONE HOUR SCAN"])
+with t1: 
+    render_analysis("30m", "30m")
+with t2: 
+    render_analysis("1h", "1h")
