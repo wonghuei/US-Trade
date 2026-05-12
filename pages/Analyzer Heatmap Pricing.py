@@ -76,7 +76,7 @@ with col_input:
     f"{st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}</p>",
     unsafe_allow_html=True
     )
-    ticker = st.text_input("Enter Ticker", value="NVDA", autocomplete="off", label_visibility="collapsed").strip().upper()
+    ticker = st.text_input("Enter Ticker", value="APP", autocomplete="off", label_visibility="collapsed").strip().upper()
 
 with col_refresh:
     st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
@@ -198,10 +198,10 @@ def build_flags(df, start, end):
     atr = calc_atr(window, 14).iloc[-1]
 
     if adr > atr:
-        vol_flag = "Increase Volume"
+        vol_flag = "ADR > ATR (Expansion)"
         vol_color = "green"
     else:
-        vol_flag = "Reduce Volume"
+        vol_flag = "ADR < ATR (Compression)"
         vol_color = "#ff5555"
 
     # --- KAMA vs EMA ---
@@ -212,7 +212,7 @@ def build_flags(df, start, end):
         flow_flag = "Trend up"
         flow_color = "green"
     else:
-        flow_flag = "Chopping"
+        flow_flag = "No Direction"
         flow_color = "#ff5555"
 
     # --- HH / LL structure ---
@@ -222,13 +222,13 @@ def build_flags(df, start, end):
     avg_price = close.mean()
 
     if current_close > avg_price:
-        struct_flag = "Structure Up"
+        struct_flag = "Close > Avg Price"
         struct_color = "green"  # Green
     elif current_close < avg_price:
-        struct_flag = "Structure Down"
+        struct_flag = "Close < Avg Price"
         struct_color = "#ff3333"  # Red
     else:
-        struct_flag = "Stable"
+        struct_flag = "Close = Avg Price"
         struct_color = "#aaaaaa"  # Grey
 
     return {
@@ -315,9 +315,7 @@ last_date = df.index[-1].date()
 # Get the most recent 5-minute bar for live pricing
 if not df_5m.empty:
     live_last = df_5m.iloc[-1]
-    # Current "Live" Price
     curr_p = float(live_last['Close'])
-    # Today's session high/low from 5m data
     today_date = df_5m.index[-1].date()
     df_today = df_5m[df_5m.index.date == today_date]
     
@@ -325,39 +323,46 @@ if not df_5m.empty:
     low_1d = float(df_today['Low'].min())
     open_1d = float(df_today['Open'].iloc[0])
 else:
-    # Fallback to daily if 5m fails
     curr_p = float(df.iloc[-1]['Close'])
     high_1d = float(df.iloc[-1]['High'])
     low_1d = float(df.iloc[-1]['Low'])
     open_1d = float(df.iloc[-1]['Open'])
 
-# Keep your existing VWAP calculation (already uses 5m)
+# --- VWAP CALCULATIONS ---
+# Current Session VWAP (from 5m data)
 vwap_1d = float(calc_last_vwap(df_5m, last_date))
 
-# 1. Calculate the Raw True Range (TR) Series
+# Rolling VWAP (from daily data)
+def calc_rolling_vwap(df, window):
+    subset = df.tail(window)
+    tp = (subset['High'] + subset['Low'] + subset['Close']) / 3
+    return (tp * subset['Volume']).sum() / subset['Volume'].sum()
+
+vwap_5d = float(calc_rolling_vwap(df, 5))
+vwap_10d = float(calc_rolling_vwap(df, 10))
+
+# --- VOLATILITY CALCULATIONS ---
 tr = pd.concat([
     df['High'] - df['Low'],
     (df['High'] - df['Close'].shift()).abs(),
     (df['Low'] - df['Close'].shift()).abs()
 ], axis=1).max(axis=1)
 
-# 2. Update ATR to use Mean (Tail 5/10) instead of iloc Snapshot
 atr_1d  = float(tr.iloc[-1])
-atr_5d  = float(tr.tail(5).mean())   # Changed from tr.iloc[-5]
-atr_10d = float(tr.tail(10).mean())  # Changed from tr.iloc[-10]
+atr_5d  = float(tr.tail(5).mean())
+atr_10d = float(tr.tail(10).mean())
 
-# 3. Standardize ADR to use Tail(n).mean() for consistency
 daily_range = df['High'] - df['Low']
 adr1   = float(daily_range.iloc[-1])
 adr5   = float(daily_range.tail(5).mean())
 adr10  = float(daily_range.tail(10).mean())
 
-# 4. Standardize Min ADR (Rolling Min of last N days)
 minadr5  = float(daily_range.tail(5).min())
 minadr10 = float(daily_range.tail(10).min())
 
-# KAMA
 kama_1d = float(calc_kama(df['Close'], 10).iloc[-1])
+poc_3m = metric_poc(df.iloc[-60:])
+poc_6m = metric_poc(df.iloc[-120:])
 
 # =====================================================
 # 🔥 KPI SECTION (ADD POC HERE)
@@ -731,26 +736,27 @@ def render_guide_tab():
 # =====================================================
 # 🔥 DISPLAY KPI METRICS (TOP PANEL)
 # =====================================================
-# Update the labels to clarify it is live data
-c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
+c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(9)
 c1.metric("Open", f"{open_1d:.2f}")
 c2.metric("High", f"{high_1d:.2f}")
 c3.metric("Low", f"{low_1d:.2f}")
-c4.metric("Close", f"{curr_p:.2f}") 
-c5.metric("VWAP", f"{vwap_1d:.2f}")
-c6.metric("KAMA", f"{kama_1d:.2f}")
-c7.metric("POC 3-Month", f"{poc_3m:.2f}")
-c8.metric("POC 6-Month", f"{poc_6m:.2f}")
+c4.metric("Close", f"{curr_p:.2f}")
+c5.metric("VWAP(R)-5D", f"{vwap_5d:.2f}")
+c6.metric("ATR-1D", f"{atr_1d:.2f}")
+c7.metric("ATR-5D", f"{atr_5d:.2f}")
+c8.metric("ATR-10D", f"{atr_10d:.2f}")
+c9.metric("Min-ADR-5D", f"{minadr5:.2f}")
 
-c9, c10, c11, c12, c13, c14, c15, c16 = st.columns(8)
-c9.metric("ATR-1D", f"{atr_1d:.2f}")
-c10.metric("ATR-5D", f"{atr_5d:.2f}")
-c11.metric("ATR-10D", f"{atr_10d:.2f}")
-c12.metric("ADR-1D", f"{adr1:.2f}")
-c13.metric("ADR-5D", f"{adr5:.2f}")
-c14.metric("ADR-10D", f"{adr10:.2f}")
-c15.metric("Min ADR-5D", f"{minadr5:.2f}")
-c16.metric("Min ADR-10D", f"{minadr10:.2f}")
+c10, c11, c12, c13, c14, c15, c16, c17, c18 = st.columns(9)
+c10.metric("VWAP-1D", f"{vwap_1d:.2f}")
+c11.metric("KAMA-1D", f"{kama_1d:.2f}")
+c12.metric("POC-3-Month", f"{poc_3m:.2f}")
+c13.metric("POC-6-Month", f"{poc_6m:.2f}")
+c14.metric("VWAP(R)-10D", f"{vwap_10d:.2f}")
+c15.metric("ADR-1D", f"{adr1:.2f}")
+c16.metric("ADR-5D", f"{adr5:.2f}")
+c17.metric("ADR-10D", f"{adr10:.2f}")
+c18.metric("Min-ADR-10D", f"{minadr10:.2f}")
 
 c1, c2, c3, c4, c5 = st.columns(5)
 timeframes = [
